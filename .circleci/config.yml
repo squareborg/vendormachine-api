@@ -1,0 +1,48 @@
+version: 2 # use CircleCI 2.0
+
+jobs: # a collection of steps
+  build: # runs not using Workflows must have a `build` job as entry point
+    docker: # run the steps with Docker
+      - image: circleci/php:7.2-cli-node-browsers@sha256:643520b7ff937bcae5910176c15f522addf69b237d19ad386be7f75f7533d794
+    steps: # a set of executable commands
+      - checkout
+
+      - run: sudo apt update --fix-missing || sudo apt update --fix-missing
+      - run: sudo apt install -y libsqlite3-dev zlib1g-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev
+      - run: sudo docker-php-ext-install zip
+      - run: sudo docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ --with-png-dir=/usr/include/
+      - run: sudo -E docker-php-ext-install -j$(nproc) gd exif
+      - run: sudo composer self-update
+
+      # Composer cache
+      - restore_cache:
+          keys:
+            - composer-v1-{{ checksum "composer.lock" }}
+            - composer-v1-
+      - run: composer install -n --ignore-platform-reqs --prefer-dist
+      - save_cache:
+          key: composer-v1-{{ checksum "composer.lock" }}
+          paths:
+            - vendor
+
+      - run:
+          name: Setup Environment
+          command: |
+            cp .env.testing .env
+            php artisan key:generate
+            php artisan passport:keys
+            touch ./storage/logs/laravel.log
+            chmod 600 storage/oauth-private.key
+            chmod 600 storage/oauth-public.key
+
+      - run:
+          name: Run Unit Tests
+          command: ./vendor/bin/phpunit -d memory_limit=512M --log-junit logs/phpunit/junit.xml --testdox-html logs/phpunit/testdox.html
+
+      - store_artifacts:
+          path: ./logs/phpunit
+          destination: phpunit
+
+      - store_artifacts:
+          path: ./storage/logs
+          destination: logs
